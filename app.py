@@ -76,6 +76,7 @@ def processar_arquivos(cubagem_file, lotes_file):
         if 'filial1/cubagem' in row and pd.notna(row['filial1/cubagem']):
             _, primeira_cidade = extrair_ax(row['filial1/cubagem'])
 
+        # Adiciona a linha do cabeçalho da rota
         dados_processados.append((rota, "", "", "", primeira_cidade, "", "", True))
 
         for i in range(1, 13):
@@ -83,6 +84,7 @@ def processar_arquivos(cubagem_file, lotes_file):
             if col_nome in row and pd.notna(row[col_nome]) and str(row[col_nome]).strip() != '':
                 ax, nome_cidade = extrair_ax(row[col_nome])
                 lote_encontrado = dict_lotes.get(str(ax), "")
+                # Adiciona as linhas das filiais
                 dados_processados.append((nome_cidade, "", lote_encontrado, "", "", "", transportadora, False))
 
     limpar_banco()
@@ -125,8 +127,10 @@ def gerar_excel(df_atual):
             cell.border = thin_border
             cell.alignment = center_align
             
-            if is_header and col_idx in [0, 4]:
+            # Formatação especial no Excel para a linha da rota
+            if is_header:
                 cell.font = bold_font
+                # Opcional: Você pode adicionar preenchimento de cor no Excel aqui depois se quiser
 
     output = io.BytesIO()
     wb.save(output)
@@ -139,9 +143,9 @@ st.markdown("Preencha os dados do carregamento. As alterações feitas na tabela
 
 with st.sidebar:
     st.header("1. Carregar Dados")
-    st.info("Faça o upload dos arquivos gerados pelo sistema para iniciar um novo espelho.")
+    st.info("Faça o upload dos arquivos para iniciar um novo espelho.")
     cubagem_file = st.file_uploader("Planilha de Cubagem", type=['xlsx', 'xls', 'csv'])
-    lotes_file = st.file_uploader("Planilha Detalhes (82) / Lotes", type=['xlsx', 'xls', 'csv'])
+    lotes_file = st.file_uploader("Planilha Detalhes (82)", type=['xlsx', 'xls', 'csv'])
     
     if st.button("Processar Novas Planilhas", use_container_width=True, type="primary"):
         if cubagem_file and lotes_file:
@@ -156,14 +160,24 @@ df_tela = carregar_dados_do_db()
 if not df_tela.empty:
     col1, col2 = st.columns([8, 2])
     with col1:
-        st.write("Dê dois cliques nas colunas **CUBAGEM**, **ROMANEIO** ou **HORÁRIO_NF** para editar.")
+        st.write("Dê dois cliques nas colunas **CUBAGEM**, **ROMANEIO** ou **HORÁRIO_NF** das cidades para editar.")
     with col2:
-        if st.button("🔄 Sincronizar (Ver edições de colegas)"):
+        if st.button("🔄 Sincronizar (Ver edições)"):
             st.rerun()
+
+    # --- LÓGICA DE COR PARA A LINHA DA ROTA ---
+    def colorir_linha_rota(row):
+        # Se is_header for True (é a linha da rota), pinta tudo de azul-escuro/grafite
+        if row['is_header']:
+            return ['background-color: #2b3a4a; color: #ffffff; font-weight: bold;'] * len(row)
+        return [''] * len(row)
+    
+    # Aplica o estilo na tabela
+    df_estilizado = df_tela.style.apply(colorir_linha_rota, axis=1)
 
     column_config = {
         "id": None, 
-        "is_header": None, 
+        "is_header": None, # Esconde a coluna de controle
         "cidades_rotas": st.column_config.TextColumn("ROTAS / CIDADES", disabled=True),
         "cubagem": st.column_config.TextColumn("CUBAGEM (Conf.)"),
         "lote": st.column_config.TextColumn("LOTE", disabled=True),
@@ -174,7 +188,7 @@ if not df_tela.empty:
     }
 
     tabela_editada = st.data_editor(
-        df_tela,
+        df_estilizado, # Passa o dataframe com as cores
         column_config=column_config,
         use_container_width=True,
         hide_index=True,
@@ -185,12 +199,33 @@ if not df_tela.empty:
     if mudancas.get("edited_rows"):
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
+        
+        teve_erro_edicao = False
+        
         for row_index, alteracoes in mudancas["edited_rows"].items():
-            id_linha = df_tela.iloc[row_index]['id']
-            for coluna, novo_valor in alteracoes.items():
-                c.execute(f"UPDATE espelho SET {coluna} = ? WHERE id = ?", (str(novo_valor), int(id_linha)))
+            # Verifica se a pessoa tentou editar a linha divisória da rota
+            is_header = df_tela.iloc[row_index]['is_header']
+            
+            if is_header:
+                # Se for a linha da rota, marca que teve erro e NÃO salva no banco
+                teve_erro_edicao = True
+            else:
+                # Se for uma linha normal de cidade, salva normalmente
+                id_linha = df_tela.iloc[row_index]['id']
+                for coluna, novo_valor in alteracoes.items():
+                    c.execute(f"UPDATE espelho SET {coluna} = ? WHERE id = ?", (str(novo_valor), int(id_linha)))
+                    
         conn.commit()
         conn.close()
+        
+        # Se a pessoa tentou editar a rota, avisa e atualiza a página para apagar o que ela fez
+        if teve_erro_edicao:
+            st.error("⚠️ Ação não permitida: A linha azul contendo o nome da ROTA não pode ser alterada.", icon="🚫")
+            st.toast("Edição na linha da rota foi ignorada.", icon="❌")
+            # Usa um botão fantasma ou pede pro usuário clicar fora para a tela limpar automaticamente
+        else:
+            # Recarrega silenciosamente em background para sincronizar
+            pass
 
     st.divider()
 
