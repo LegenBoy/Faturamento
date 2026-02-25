@@ -76,7 +76,7 @@ def processar_arquivos(cubagem_file, lotes_file):
         if 'filial1/cubagem' in row and pd.notna(row['filial1/cubagem']):
             _, primeira_cidade = extrair_ax(row['filial1/cubagem'])
 
-        # Adiciona a linha do cabeçalho da rota (Linha Cinza) - Tudo vazio exceto Rota e BOX
+        # Linha Cinza da Rota - Forçando tudo a ficar vazio, exceto o nome
         dados_processados.append((rota, "", "", "", primeira_cidade, "", "", True))
 
         for i in range(1, 13):
@@ -84,7 +84,7 @@ def processar_arquivos(cubagem_file, lotes_file):
             if col_nome in row and pd.notna(row[col_nome]) and str(row[col_nome]).strip() != '':
                 ax, nome_cidade = extrair_ax(row[col_nome])
                 lote_encontrado = dict_lotes.get(str(ax), "")
-                # Adiciona as linhas das filiais (Linhas Brancas Editáveis)
+                # Linhas Brancas das Cidades
                 dados_processados.append((nome_cidade, "", lote_encontrado, "", "", "", transportadora, False))
 
     limpar_banco()
@@ -105,8 +105,6 @@ def gerar_excel(df_atual):
     bold_font = Font(bold=True)
     center_align = Alignment(horizontal='center', vertical='center')
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    
-    # Criando o preenchimento cinza para o Excel
     cinza_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
 
     headers = ["ROTAS 1 BATIDA", "CUBAGEM (Conferente)", "LOTE", "ROMANEIO", "BOX", "HORÁRIO INICIO (NF)", "HORÁRIO INICIO (Transp.)"]
@@ -130,10 +128,9 @@ def gerar_excel(df_atual):
             cell.border = thin_border
             cell.alignment = center_align
             
-            # Formatação especial no Excel para a linha da rota
             if is_header:
                 cell.font = bold_font
-                cell.fill = cinza_fill # Pinta a linha inteira de cinza no Excel
+                cell.fill = cinza_fill
 
     output = io.BytesIO()
     wb.save(output)
@@ -168,10 +165,8 @@ if not df_tela.empty:
         if st.button("🔄 Sincronizar (Ver edições)"):
             st.rerun()
 
-    # --- LÓGICA DE COR PARA A LINHA DA ROTA (CINZA) ---
     def colorir_linha_rota(row):
         if row['is_header']:
-            # Pinta a linha de cinza claro com letras pretas em negrito
             return ['background-color: #D3D3D3; color: #000000; font-weight: bold;'] * len(row)
         return [''] * len(row)
     
@@ -180,6 +175,7 @@ if not df_tela.empty:
     column_config = {
         "id": None, 
         "is_header": None, 
+        # Apenas ROTAS, LOTE, BOX e TRANSP bloqueados de ponta a ponta
         "cidades_rotas": st.column_config.TextColumn("ROTAS / CIDADES", disabled=True),
         "cubagem": st.column_config.TextColumn("CUBAGEM (Conf.)"),
         "lote": st.column_config.TextColumn("LOTE", disabled=True),
@@ -208,10 +204,10 @@ if not df_tela.empty:
             is_header = df_tela.iloc[row_index]['is_header']
             
             if is_header:
-                # Se for a linha da rota (cinza), ativa o bloqueio
+                # O sistema detecta que tentaram digitar na linha cinza e apenas marca como erro silencioso
                 teve_erro_edicao = True
             else:
-                # Se for linha de cidade, salva normalmente
+                # Salva no banco de dados apenas as linhas das cidades
                 id_linha = df_tela.iloc[row_index]['id']
                 for coluna, novo_valor in alteracoes.items():
                     c.execute(f"UPDATE espelho SET {coluna} = ? WHERE id = ?", (str(novo_valor), int(id_linha)))
@@ -220,8 +216,7 @@ if not df_tela.empty:
         conn.close()
         
         if teve_erro_edicao:
-            st.error("⚠️ A linha cinza divisória da ROTA é bloqueada e não pode receber informações.", icon="🚫")
-            # Atualiza a página automaticamente para apagar a digitação incorreta da tela
+            # Ao invés de mostrar aviso vermelho, o sistema pisca rápido e devolve a linha em branco
             st.rerun() 
         else:
             pass
