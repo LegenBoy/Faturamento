@@ -3,7 +3,7 @@ import pandas as pd
 import sqlite3
 import io
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
 st.set_page_config(page_title="Sistema de Cubagem", layout="wide")
 
@@ -76,7 +76,7 @@ def processar_arquivos(cubagem_file, lotes_file):
         if 'filial1/cubagem' in row and pd.notna(row['filial1/cubagem']):
             _, primeira_cidade = extrair_ax(row['filial1/cubagem'])
 
-        # Adiciona a linha da rota (Cabeçalho em branco)
+        # Adiciona a linha da rota em branco (exceto o nome e o box)
         dados_processados.append((rota, "", "", "", primeira_cidade, "", "", True))
 
         for i in range(1, 13):
@@ -84,7 +84,6 @@ def processar_arquivos(cubagem_file, lotes_file):
             if col_nome in row and pd.notna(row[col_nome]) and str(row[col_nome]).strip() != '':
                 ax, nome_cidade = extrair_ax(row[col_nome])
                 lote_encontrado = dict_lotes.get(str(ax), "")
-                # Adiciona as linhas das filiais (Onde a digitação acontece)
                 dados_processados.append((nome_cidade, "", lote_encontrado, "", "", "", transportadora, False))
 
     limpar_banco()
@@ -102,9 +101,17 @@ def gerar_excel(df_atual):
     ws = wb.active
     ws.title = "Espelho Carregamento"
 
+    # --- O SEGREDO ESTÁ AQUI: Desliga a grade padrão de fundo do Excel ---
+    ws.sheet_view.showGridLines = False
+
     bold_font = Font(bold=True)
     center_align = Alignment(horizontal='center', vertical='center')
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    
+    # Preenchimento branco puro para forçar a remoção de marcas de célula
+    white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    # Sem borda para as linhas da rota
+    no_border = Border()
 
     headers = ["ROTAS 1 BATIDA", "CUBAGEM (Conferente)", "LOTE", "ROMANEIO", "BOX", "HORÁRIO INICIO (NF)", "HORÁRIO INICIO (Transp.)"]
     ws.append(headers)
@@ -127,10 +134,10 @@ def gerar_excel(df_atual):
             cell.alignment = center_align
             
             if is_header:
-                # Na linha da rota, a fonte é negrito, mas NÃO tem borda (fica em branco igual ao PDF)
                 cell.font = bold_font
+                cell.fill = white_fill # Força a cor branca sólida
+                cell.border = no_border # Assegura que a linha da rota não tenha nenhuma borda
             else:
-                # Se for a linha da cidade, aí sim desenha a "grade" preta da tabela
                 cell.border = thin_border
 
     output = io.BytesIO()
@@ -166,11 +173,10 @@ if not df_tela.empty:
         if st.button("🔄 Sincronizar (Ver edições)"):
             st.rerun()
 
-    # --- LÓGICA DE COR: LINHA DA ROTA EM BRANCO ---
     def colorir_linha_rota(row):
         if row['is_header']:
-            # Força o fundo branco e letra preta para dar o efeito de "linha vazia"
-            return ['background-color: #FFFFFF; color: #000000; font-weight: bold;'] * len(row)
+            # Força o estilo branco puro também na interface do Streamlit
+            return ['background-color: #FFFFFF; color: #000000; font-weight: bold; border: none !important;'] * len(row)
         return [''] * len(row)
     
     df_estilizado = df_tela.style.apply(colorir_linha_rota, axis=1)
@@ -206,7 +212,6 @@ if not df_tela.empty:
             is_header = df_tela.iloc[row_index]['is_header']
             
             if is_header:
-                # Bloqueio invisível: se tentar digitar na linha branca da rota, ignora.
                 teve_erro_edicao = True
             else:
                 id_linha = df_tela.iloc[row_index]['id']
@@ -217,10 +222,7 @@ if not df_tela.empty:
         conn.close()
         
         if teve_erro_edicao:
-            # Apaga silenciosamente o que foi digitado na linha da rota
             st.rerun() 
-        else:
-            pass
 
     st.divider()
 
