@@ -3,7 +3,7 @@ import pandas as pd
 import sqlite3
 import io
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
 st.set_page_config(page_title="Sistema de Cubagem", layout="wide")
 
@@ -76,7 +76,7 @@ def processar_arquivos(cubagem_file, lotes_file):
         if 'filial1/cubagem' in row and pd.notna(row['filial1/cubagem']):
             _, primeira_cidade = extrair_ax(row['filial1/cubagem'])
 
-        # Adiciona a linha do cabeçalho da rota
+        # Adiciona a linha do cabeçalho da rota (Linha Cinza) - Tudo vazio exceto Rota e BOX
         dados_processados.append((rota, "", "", "", primeira_cidade, "", "", True))
 
         for i in range(1, 13):
@@ -84,7 +84,7 @@ def processar_arquivos(cubagem_file, lotes_file):
             if col_nome in row and pd.notna(row[col_nome]) and str(row[col_nome]).strip() != '':
                 ax, nome_cidade = extrair_ax(row[col_nome])
                 lote_encontrado = dict_lotes.get(str(ax), "")
-                # Adiciona as linhas das filiais
+                # Adiciona as linhas das filiais (Linhas Brancas Editáveis)
                 dados_processados.append((nome_cidade, "", lote_encontrado, "", "", "", transportadora, False))
 
     limpar_banco()
@@ -105,6 +105,9 @@ def gerar_excel(df_atual):
     bold_font = Font(bold=True)
     center_align = Alignment(horizontal='center', vertical='center')
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    
+    # Criando o preenchimento cinza para o Excel
+    cinza_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
 
     headers = ["ROTAS 1 BATIDA", "CUBAGEM (Conferente)", "LOTE", "ROMANEIO", "BOX", "HORÁRIO INICIO (NF)", "HORÁRIO INICIO (Transp.)"]
     ws.append(headers)
@@ -130,7 +133,7 @@ def gerar_excel(df_atual):
             # Formatação especial no Excel para a linha da rota
             if is_header:
                 cell.font = bold_font
-                # Opcional: Você pode adicionar preenchimento de cor no Excel aqui depois se quiser
+                cell.fill = cinza_fill # Pinta a linha inteira de cinza no Excel
 
     output = io.BytesIO()
     wb.save(output)
@@ -165,19 +168,18 @@ if not df_tela.empty:
         if st.button("🔄 Sincronizar (Ver edições)"):
             st.rerun()
 
-    # --- LÓGICA DE COR PARA A LINHA DA ROTA ---
+    # --- LÓGICA DE COR PARA A LINHA DA ROTA (CINZA) ---
     def colorir_linha_rota(row):
-        # Se is_header for True (é a linha da rota), pinta tudo de azul-escuro/grafite
         if row['is_header']:
-            return ['background-color: #2b3a4a; color: #ffffff; font-weight: bold;'] * len(row)
+            # Pinta a linha de cinza claro com letras pretas em negrito
+            return ['background-color: #D3D3D3; color: #000000; font-weight: bold;'] * len(row)
         return [''] * len(row)
     
-    # Aplica o estilo na tabela
     df_estilizado = df_tela.style.apply(colorir_linha_rota, axis=1)
 
     column_config = {
         "id": None, 
-        "is_header": None, # Esconde a coluna de controle
+        "is_header": None, 
         "cidades_rotas": st.column_config.TextColumn("ROTAS / CIDADES", disabled=True),
         "cubagem": st.column_config.TextColumn("CUBAGEM (Conf.)"),
         "lote": st.column_config.TextColumn("LOTE", disabled=True),
@@ -188,7 +190,7 @@ if not df_tela.empty:
     }
 
     tabela_editada = st.data_editor(
-        df_estilizado, # Passa o dataframe com as cores
+        df_estilizado, 
         column_config=column_config,
         use_container_width=True,
         hide_index=True,
@@ -203,14 +205,13 @@ if not df_tela.empty:
         teve_erro_edicao = False
         
         for row_index, alteracoes in mudancas["edited_rows"].items():
-            # Verifica se a pessoa tentou editar a linha divisória da rota
             is_header = df_tela.iloc[row_index]['is_header']
             
             if is_header:
-                # Se for a linha da rota, marca que teve erro e NÃO salva no banco
+                # Se for a linha da rota (cinza), ativa o bloqueio
                 teve_erro_edicao = True
             else:
-                # Se for uma linha normal de cidade, salva normalmente
+                # Se for linha de cidade, salva normalmente
                 id_linha = df_tela.iloc[row_index]['id']
                 for coluna, novo_valor in alteracoes.items():
                     c.execute(f"UPDATE espelho SET {coluna} = ? WHERE id = ?", (str(novo_valor), int(id_linha)))
@@ -218,13 +219,11 @@ if not df_tela.empty:
         conn.commit()
         conn.close()
         
-        # Se a pessoa tentou editar a rota, avisa e atualiza a página para apagar o que ela fez
         if teve_erro_edicao:
-            st.error("⚠️ Ação não permitida: A linha azul contendo o nome da ROTA não pode ser alterada.", icon="🚫")
-            st.toast("Edição na linha da rota foi ignorada.", icon="❌")
-            # Usa um botão fantasma ou pede pro usuário clicar fora para a tela limpar automaticamente
+            st.error("⚠️ A linha cinza divisória da ROTA é bloqueada e não pode receber informações.", icon="🚫")
+            # Atualiza a página automaticamente para apagar a digitação incorreta da tela
+            st.rerun() 
         else:
-            # Recarrega silenciosamente em background para sincronizar
             pass
 
     st.divider()
