@@ -3,7 +3,7 @@ import pandas as pd
 import sqlite3
 import io
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.styles import Font, Alignment, Border, Side
 
 st.set_page_config(page_title="Sistema de Cubagem", layout="wide")
 
@@ -76,7 +76,7 @@ def processar_arquivos(cubagem_file, lotes_file):
         if 'filial1/cubagem' in row and pd.notna(row['filial1/cubagem']):
             _, primeira_cidade = extrair_ax(row['filial1/cubagem'])
 
-        # Linha Cinza da Rota - Forçando tudo a ficar vazio, exceto o nome
+        # Adiciona a linha da rota (Cabeçalho em branco)
         dados_processados.append((rota, "", "", "", primeira_cidade, "", "", True))
 
         for i in range(1, 13):
@@ -84,7 +84,7 @@ def processar_arquivos(cubagem_file, lotes_file):
             if col_nome in row and pd.notna(row[col_nome]) and str(row[col_nome]).strip() != '':
                 ax, nome_cidade = extrair_ax(row[col_nome])
                 lote_encontrado = dict_lotes.get(str(ax), "")
-                # Linhas Brancas das Cidades
+                # Adiciona as linhas das filiais (Onde a digitação acontece)
                 dados_processados.append((nome_cidade, "", lote_encontrado, "", "", "", transportadora, False))
 
     limpar_banco()
@@ -105,7 +105,6 @@ def gerar_excel(df_atual):
     bold_font = Font(bold=True)
     center_align = Alignment(horizontal='center', vertical='center')
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    cinza_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
 
     headers = ["ROTAS 1 BATIDA", "CUBAGEM (Conferente)", "LOTE", "ROMANEIO", "BOX", "HORÁRIO INICIO (NF)", "HORÁRIO INICIO (Transp.)"]
     ws.append(headers)
@@ -125,12 +124,14 @@ def gerar_excel(df_atual):
         
         for col_idx, val in enumerate(valores):
             cell = ws.cell(row=excel_row, column=col_idx+1, value=val)
-            cell.border = thin_border
             cell.alignment = center_align
             
             if is_header:
+                # Na linha da rota, a fonte é negrito, mas NÃO tem borda (fica em branco igual ao PDF)
                 cell.font = bold_font
-                cell.fill = cinza_fill
+            else:
+                # Se for a linha da cidade, aí sim desenha a "grade" preta da tabela
+                cell.border = thin_border
 
     output = io.BytesIO()
     wb.save(output)
@@ -165,9 +166,11 @@ if not df_tela.empty:
         if st.button("🔄 Sincronizar (Ver edições)"):
             st.rerun()
 
+    # --- LÓGICA DE COR: LINHA DA ROTA EM BRANCO ---
     def colorir_linha_rota(row):
         if row['is_header']:
-            return ['background-color: #D3D3D3; color: #000000; font-weight: bold;'] * len(row)
+            # Força o fundo branco e letra preta para dar o efeito de "linha vazia"
+            return ['background-color: #FFFFFF; color: #000000; font-weight: bold;'] * len(row)
         return [''] * len(row)
     
     df_estilizado = df_tela.style.apply(colorir_linha_rota, axis=1)
@@ -175,7 +178,6 @@ if not df_tela.empty:
     column_config = {
         "id": None, 
         "is_header": None, 
-        # Apenas ROTAS, LOTE, BOX e TRANSP bloqueados de ponta a ponta
         "cidades_rotas": st.column_config.TextColumn("ROTAS / CIDADES", disabled=True),
         "cubagem": st.column_config.TextColumn("CUBAGEM (Conf.)"),
         "lote": st.column_config.TextColumn("LOTE", disabled=True),
@@ -204,10 +206,9 @@ if not df_tela.empty:
             is_header = df_tela.iloc[row_index]['is_header']
             
             if is_header:
-                # O sistema detecta que tentaram digitar na linha cinza e apenas marca como erro silencioso
+                # Bloqueio invisível: se tentar digitar na linha branca da rota, ignora.
                 teve_erro_edicao = True
             else:
-                # Salva no banco de dados apenas as linhas das cidades
                 id_linha = df_tela.iloc[row_index]['id']
                 for coluna, novo_valor in alteracoes.items():
                     c.execute(f"UPDATE espelho SET {coluna} = ? WHERE id = ?", (str(novo_valor), int(id_linha)))
@@ -216,7 +217,7 @@ if not df_tela.empty:
         conn.close()
         
         if teve_erro_edicao:
-            # Ao invés de mostrar aviso vermelho, o sistema pisca rápido e devolve a linha em branco
+            # Apaga silenciosamente o que foi digitado na linha da rota
             st.rerun() 
         else:
             pass
